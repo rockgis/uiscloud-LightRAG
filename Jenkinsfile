@@ -88,8 +88,8 @@ pipeline {
 
                         cp docker-compose.yml ${params.DEPLOY_DIR}/docker-compose.yml
 
-                        # .env 파일이 root 소유인 경우 권한 복구 (bind-mount 잔재)
-                        sudo chown \$(whoami):\$(whoami) ${params.DEPLOY_DIR}/.env 2>/dev/null || true
+                        # root 소유 .env 제거 후 새로 생성 (bind-mount 잔재 대응)
+                        sudo rm -f ${params.DEPLOY_DIR}/.env 2>/dev/null || rm -f ${params.DEPLOY_DIR}/.env 2>/dev/null || true
                         cp \$ENV_FILE ${params.DEPLOY_DIR}/.env
 
                         cd ${params.DEPLOY_DIR}
