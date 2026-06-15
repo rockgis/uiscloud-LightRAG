@@ -89,7 +89,7 @@ pipeline {
                         usernameVariable: 'SSH_USER'
                     ),
                     file(
-                        credentialsId: 'env-file-prod',
+                        credentialsId: 'env-file-lightrag',
                         variable: 'ENV_FILE'
                     )
                 ]) {
