@@ -82,49 +82,18 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'deploy-server-ssh',
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
-                    ),
-                    file(
-                        credentialsId: 'env-file-lightrag',
-                        variable: 'ENV_FILE'
-                    )
-                ]) {
+                withCredentials([file(credentialsId: 'env-file-lightrag', variable: 'ENV_FILE')]) {
                     sh """
-                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                            \${SSH_USER}@${params.DEPLOY_HOST} \\
-                            "mkdir -p ${params.DEPLOY_DIR}/data/{rag_storage,inputs,prompts}"
+                        mkdir -p ${params.DEPLOY_DIR}/data/{rag_storage,inputs,prompts}
 
-                        scp -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                            docker-compose.yml \\
-                            \${SSH_USER}@${params.DEPLOY_HOST}:${params.DEPLOY_DIR}/docker-compose.yml
+                        cp docker-compose.yml ${params.DEPLOY_DIR}/docker-compose.yml
+                        cp \$ENV_FILE ${params.DEPLOY_DIR}/.env
 
-                        scp -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                            \$ENV_FILE \\
-                            \${SSH_USER}@${params.DEPLOY_HOST}:/tmp/.env_lightrag
-
-                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                            \${SSH_USER}@${params.DEPLOY_HOST} \\
-                            "cp /tmp/.env_lightrag ${params.DEPLOY_DIR}/.env && rm /tmp/.env_lightrag"
-
-                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                            \${SSH_USER}@${params.DEPLOY_HOST} \\
-                            "cd ${params.DEPLOY_DIR} && docker pull ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
-
-                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                            \${SSH_USER}@${params.DEPLOY_HOST} \\
-                            "sed -i 's|image: .*lightrag.*|image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}|g' ${params.DEPLOY_DIR}/docker-compose.yml"
-
-                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                            \${SSH_USER}@${params.DEPLOY_HOST} \\
-                            "cd ${params.DEPLOY_DIR} && docker compose down --timeout 30 || true"
-
-                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                            \${SSH_USER}@${params.DEPLOY_HOST} \\
-                            "cd ${params.DEPLOY_DIR} && docker compose up -d"
+                        cd ${params.DEPLOY_DIR}
+                        docker pull ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+                        sed -i 's|image: .*lightrag.*|image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}|g' docker-compose.yml
+                        docker compose down --timeout 30 || true
+                        docker compose up -d
 
                         echo "Deploy completed: ${env.IMAGE_TAG}"
                     """
@@ -167,36 +136,29 @@ pipeline {
         }
         failure {
             script {
-                withCredentials([sshUserPrivateKey(
-                    credentialsId: 'deploy-server-ssh',
-                    keyFileVariable: 'SSH_KEY',
-                    usernameVariable: 'SSH_USER'
-                )]) {
-                    echo "Deployment FAILED -- attempting rollback"
-                    def prevTag = sh(
-                        script: """
-                            ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                                \${SSH_USER}@${params.DEPLOY_HOST} \\
-                                "docker images ${env.IMAGE_NAME} --format '{{.Tag}}' | grep -v latest | grep -v '${env.IMAGE_TAG}' | sort -r | head -1"
-                        """,
-                        returnStdout: true
-                    ).trim()
+                echo "Deployment FAILED -- attempting rollback"
+                def prevTag = sh(
+                    script: """
+                        docker images ${env.IMAGE_NAME} --format '{{.Tag}}' \
+                            | grep -v latest \
+                            | grep -v '${env.IMAGE_TAG}' \
+                            | sort -r | head -1
+                    """,
+                    returnStdout: true
+                ).trim()
 
-                    if (prevTag) {
-                        echo "Rolling back to: ${prevTag}"
-                        sh """
-                            ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                                \${SSH_USER}@${params.DEPLOY_HOST} \\
-                                "sed -i 's|image: .*lightrag.*|image: ${env.IMAGE_NAME}:${prevTag}|g' ${params.DEPLOY_DIR}/docker-compose.yml"
-
-                            ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
-                                \${SSH_USER}@${params.DEPLOY_HOST} \\
-                                "cd ${params.DEPLOY_DIR} && docker compose down --timeout 30 || true && docker compose up -d"
-                        """
-                        echo "Rollback to ${prevTag} completed"
-                    } else {
-                        echo "No previous image found for rollback"
-                    }
+                if (prevTag) {
+                    echo "Rolling back to: ${prevTag}"
+                    sh """
+                        sed -i 's|image: .*lightrag.*|image: ${env.IMAGE_NAME}:${prevTag}|g' \
+                            ${params.DEPLOY_DIR}/docker-compose.yml
+                        cd ${params.DEPLOY_DIR}
+                        docker compose down --timeout 30 || true
+                        docker compose up -d
+                    """
+                    echo "Rollback to ${prevTag} completed"
+                } else {
+                    echo "No previous image found for rollback"
                 }
             }
         }
