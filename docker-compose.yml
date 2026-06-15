@@ -6,13 +6,14 @@ services:
       dockerfile: Dockerfile
       tags:
         - ghcr.io/hkuds/lightrag:latest
+    env_file:
+      - .env
     ports:
       - "${HOST:-0.0.0.0}:${PORT:-9621}:9621"
     volumes:
       - ./data/rag_storage:/app/data/rag_storage
       - ./data/inputs:/app/data/inputs
       - ./data/prompts:/app/data/prompts
-      - ./.env:/app/.env
     deploy:
       restart_policy:
         condition: on-failure
