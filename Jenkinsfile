@@ -104,7 +104,11 @@ pipeline {
 
                         scp -i \$SSH_KEY -o StrictHostKeyChecking=no \\
                             \$ENV_FILE \\
-                            \${SSH_USER}@${params.DEPLOY_HOST}:${params.DEPLOY_DIR}/.env
+                            \${SSH_USER}@${params.DEPLOY_HOST}:/tmp/.env_lightrag
+
+                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                            \${SSH_USER}@${params.DEPLOY_HOST} \\
+                            "cp /tmp/.env_lightrag ${params.DEPLOY_DIR}/.env && rm /tmp/.env_lightrag"
 
                         ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
                             \${SSH_USER}@${params.DEPLOY_HOST} \\
