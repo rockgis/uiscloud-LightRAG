@@ -1,0 +1,53 @@
+# Sensitive config
+.env
+.env.*
+!env.example
+!env.docker-compose-full
+
+# RAG data (large, environment-specific)
+data/
+rag_storage/
+inputs/
+output_complete/
+dickens/
+reproduce/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.python-version
+
+# Test artifacts
+temp/
+.pytest_cache/
+.coverage
+*.log
+log/
+
+# Cache
+.cache/
+.mypy_cache/
+.ruff_cache/
+.gradio/
+.logfire/
+
+# Frontend build output (generated)
+lightrag_webui/dist/
+lightrag/api/webui/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Bun
+lightrag_webui/node_modules/
