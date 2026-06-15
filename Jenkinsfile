@@ -51,15 +51,15 @@ pipeline {
 
         stage('Build Image') {
             steps {
-                sh '''
+                sh """
                     docker build \
-                        --cache-from ${IMAGE_NAME}:latest \
+                        --cache-from ${env.IMAGE_NAME}:latest \
                         --build-arg BUILDKIT_INLINE_CACHE=1 \
                         -f Dockerfile \
-                        -t ${IMAGE_NAME}:${IMAGE_TAG} \
-                        -t ${IMAGE_NAME}:latest \
+                        -t ${env.IMAGE_NAME}:${env.IMAGE_TAG} \
+                        -t ${env.IMAGE_NAME}:latest \
                         .
-                '''
+                """
             }
         }
 
@@ -70,12 +70,12 @@ pipeline {
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh '''
-                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
-                        docker push ${IMAGE_NAME}:latest
+                    sh """
+                        echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
+                        docker push ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+                        docker push ${env.IMAGE_NAME}:latest
                         docker logout
-                    '''
+                    """
                 }
             }
         }
@@ -94,38 +94,35 @@ pipeline {
                     )
                 ]) {
                     sh """
-                        # 배포 서버에 디렉토리 생성
-                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \
-                            \${SSH_USER}@${params.DEPLOY_HOST} \
+                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                            \${SSH_USER}@${params.DEPLOY_HOST} \\
                             "mkdir -p ${params.DEPLOY_DIR}/data/{rag_storage,inputs,prompts}"
 
-                        # docker-compose.yml 및 .env 파일 전송
-                        scp -i \$SSH_KEY -o StrictHostKeyChecking=no \
-                            docker-compose.yml \
+                        scp -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                            docker-compose.yml \\
                             \${SSH_USER}@${params.DEPLOY_HOST}:${params.DEPLOY_DIR}/docker-compose.yml
 
-                        scp -i \$SSH_KEY -o StrictHostKeyChecking=no \
-                            \$ENV_FILE \
+                        scp -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                            \$ENV_FILE \\
                             \${SSH_USER}@${params.DEPLOY_HOST}:${params.DEPLOY_DIR}/.env
 
-                        # 원격 서버에서 배포 실행
-                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \
-                            \${SSH_USER}@${params.DEPLOY_HOST} << REMOTE
-                                set -e
-                                cd ${params.DEPLOY_DIR}
+                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                            \${SSH_USER}@${params.DEPLOY_HOST} \\
+                            "cd ${params.DEPLOY_DIR} && docker pull ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
 
-                                # 새 이미지 pull
-                                docker pull ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                            \${SSH_USER}@${params.DEPLOY_HOST} \\
+                            "sed -i 's|image: .*lightrag.*|image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}|g' ${params.DEPLOY_DIR}/docker-compose.yml"
 
-                                # docker-compose의 이미지를 빌드 태그로 고정
-                                sed -i 's|image: .*lightrag.*|image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}|g' docker-compose.yml
+                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                            \${SSH_USER}@${params.DEPLOY_HOST} \\
+                            "cd ${params.DEPLOY_DIR} && docker compose down --timeout 30 || true"
 
-                                # 컨테이너 재시작 (데이터 볼륨 유지)
-                                docker compose down --timeout 30 || true
-                                docker compose up -d
+                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                            \${SSH_USER}@${params.DEPLOY_HOST} \\
+                            "cd ${params.DEPLOY_DIR} && docker compose up -d"
 
-                                echo "Deploy completed: ${env.IMAGE_TAG}"
-REMOTE
+                        echo "Deploy completed: ${env.IMAGE_TAG}"
                     """
                 }
             }
@@ -133,28 +130,28 @@ REMOTE
 
         stage('Health Check') {
             steps {
-                withCredentials([sshUserPrivateKey(
-                    credentialsId: 'deploy-server-ssh',
-                    keyFileVariable: 'SSH_KEY',
-                    usernameVariable: 'SSH_USER'
-                )]) {
-                    sh """
-                        ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \
-                            \${SSH_USER}@${params.DEPLOY_HOST} << REMOTE
-                                echo "Health check: http://localhost:${env.APP_PORT}/health"
-                                for i in \$(seq 1 18); do
-                                    if curl -sf http://localhost:${env.APP_PORT}/health > /dev/null 2>&1; then
-                                        echo "Health check PASSED (attempt \$i)"
-                                        exit 0
-                                    fi
-                                    echo "Waiting... (\$i/18)"
-                                    sleep 10
-                                done
-                                echo "Health check FAILED after 3 minutes"
-                                docker compose -f ${params.DEPLOY_DIR}/docker-compose.yml logs --tail=50
-                                exit 1
-REMOTE
-                    """
+                script {
+                    def maxAttempts = 18
+                    def url = "http://${params.DEPLOY_HOST}:${env.APP_PORT}/health"
+                    echo "Health check URL: ${url}"
+
+                    for (int i = 1; i <= maxAttempts; i++) {
+                        def status = sh(
+                            script: "curl -sf '${url}'",
+                            returnStatus: true
+                        )
+                        if (status == 0) {
+                            echo "Health check PASSED (attempt ${i}/${maxAttempts})"
+                            return
+                        }
+                        echo "Waiting... (${i}/${maxAttempts})"
+                        if (i < maxAttempts) {
+                            sleep(10)
+                        }
+                    }
+
+                    sh "docker compose -f ${params.DEPLOY_DIR}/docker-compose.yml logs --tail=50 || true"
+                    error "Health check FAILED after ${maxAttempts * 10} seconds"
                 }
             }
         }
@@ -162,32 +159,41 @@ REMOTE
 
     post {
         success {
-            echo "Deployment SUCCESS: ${env.IMAGE_NAME}:${env.IMAGE_TAG} → ${params.DEPLOY_HOST}:${env.APP_PORT}"
+            echo "Deployment SUCCESS: ${env.IMAGE_NAME}:${env.IMAGE_TAG} -> ${params.DEPLOY_HOST}:${env.APP_PORT}"
         }
         failure {
-            withCredentials([sshUserPrivateKey(
-                credentialsId: 'deploy-server-ssh',
-                keyFileVariable: 'SSH_KEY',
-                usernameVariable: 'SSH_USER'
-            )]) {
-                sh """
-                    echo "Deployment FAILED — attempting rollback"
-                    ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \
-                        \${SSH_USER}@${params.DEPLOY_HOST} << REMOTE
-                            cd ${params.DEPLOY_DIR}
-                            PREV_TAG=\$(docker images ${env.IMAGE_NAME} --format '{{.Tag}}' \
-                                | grep -v latest | grep -v ${env.IMAGE_TAG} \
-                                | sort -t'-' -k2 -r | head -1)
-                            if [ -n "\$PREV_TAG" ]; then
-                                echo "Rolling back to: \$PREV_TAG"
-                                sed -i "s|image: .*lightrag.*|image: ${env.IMAGE_NAME}:\$PREV_TAG|g" docker-compose.yml
-                                docker compose down --timeout 30 || true
-                                docker compose up -d
-                            else
-                                echo "No previous image found for rollback"
-                            fi
-REMOTE
-                """
+            script {
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: 'deploy-server-ssh',
+                    keyFileVariable: 'SSH_KEY',
+                    usernameVariable: 'SSH_USER'
+                )]) {
+                    echo "Deployment FAILED -- attempting rollback"
+                    def prevTag = sh(
+                        script: """
+                            ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                                \${SSH_USER}@${params.DEPLOY_HOST} \\
+                                "docker images ${env.IMAGE_NAME} --format '{{.Tag}}' | grep -v latest | grep -v '${env.IMAGE_TAG}' | sort -r | head -1"
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    if (prevTag) {
+                        echo "Rolling back to: ${prevTag}"
+                        sh """
+                            ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                                \${SSH_USER}@${params.DEPLOY_HOST} \\
+                                "sed -i 's|image: .*lightrag.*|image: ${env.IMAGE_NAME}:${prevTag}|g' ${params.DEPLOY_DIR}/docker-compose.yml"
+
+                            ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \\
+                                \${SSH_USER}@${params.DEPLOY_HOST} \\
+                                "cd ${params.DEPLOY_DIR} && docker compose down --timeout 30 || true && docker compose up -d"
+                        """
+                        echo "Rollback to ${prevTag} completed"
+                    } else {
+                        echo "No previous image found for rollback"
+                    }
+                }
             }
         }
         always {
