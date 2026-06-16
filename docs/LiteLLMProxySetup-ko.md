@@ -91,12 +91,15 @@ LightRAG의 기본 설정(`MAX_TOTAL_TOKENS=30,000`)에서는 KG 컨텍스트가
 MAX_TOTAL_TOKENS=4000      # 총 컨텍스트 예산 (기본 30,000 → 4,000)
 MAX_ENTITY_TOKENS=1000     # 엔티티 컨텍스트 상한 (기본 6,000 → 1,000)
 MAX_RELATION_TOKENS=1000   # 관계 컨텍스트 상한 (기본 8,000 → 1,000)
-OPENAI_LLM_MAX_TOKENS=600  # 생성 토큰 상한 (반복 루프 방지)
+OPENAI_LLM_MAX_TOKENS=700  # 생성 토큰 상한 (반복 루프 방지)
+OPENAI_LLM_EXTRA_BODY={"chat_template_kwargs": {"enable_thinking": false}, "repetition_penalty": 1.15}
 ```
 
-이 설정으로 system prompt를 ~4,000 토큰 이하로 유지하고, 생성 토큰 상한을 600으로 제한해 총 시퀀스 길이(입력+출력)가 AWQ 모델의 안정 임계값(~4,600 토큰)을 넘지 않도록 합니다.
+이 설정으로 system prompt를 ~4,000 토큰 이하로 유지하고, 생성 토큰 상한을 700으로 제한해 총 시퀀스 길이(입력+출력)가 AWQ 모델의 안정 임계값(~4,600 토큰)을 넘지 않도록 합니다.
 
-> **왜 600인가?** Qwen3-AWQ는 총 토큰 수(입력+출력)가 ~3,500~5,000 범위를 넘으면 반복 루프(garbage 또는 동일 문구 반복) 증상이 나타납니다. naive 모드 기준 입력 ~2,950 토큰 + 출력 600 토큰 = ~3,550 토큰으로 안전 범위 내에 유지됩니다.
+> **왜 700인가?** Qwen3-AWQ는 총 토큰 수(입력+출력)가 ~3,500~5,000 범위를 넘으면 반복 루프(garbage 또는 동일 문구 반복) 증상이 나타납니다. naive 모드 기준 입력 ~2,950 토큰 + 출력 700 토큰 = ~3,650 토큰으로 안전 범위 내에 유지됩니다. 600 토큰에서도 안전하나 응답이 중간에 잘리는 경우가 있어 700으로 상향했습니다.
+
+> **`repetition_penalty`란?** vLLM `extra_body`로 전달되는 반복 억제 파라미터입니다. 1.15는 동일 토큰이 반복될수록 생성 확률을 낮춥니다. 1.0(기본)에서는 반복이 가속되는 경향이 있으며, 1.2 이상은 출력 품질이 저하될 수 있습니다. LiteLLM 경유 시 `drop_params: true`에 의해 무시될 수 있으므로 **직접 vLLM 연결에서만** 안정적으로 적용됩니다.
 
 ### 해결책 2: Thinking 완전 비활성화 (AWQ 권장)
 
@@ -122,6 +125,30 @@ You are an expert AI assistant...
 - `keywords_extraction`
 
 `enable_thinking: false`와 함께 사용하면 defense-in-depth 효과를 냅니다.
+
+### 해결책 4: 출력 품질 개선 (`prompt.py` 수정)
+
+AWQ 모델에서 발생하는 한국어 일관성 저하 및 References 형식 문제는 프롬프트 지시로 일부 완화할 수 있습니다. `rag_response`와 `naive_rag_response` 양쪽에 아래 섹션을 추가합니다.
+
+**한국어 일관성 지시 추가 (Section 3):**
+```
+3. Formatting & Language:
+  - The response MUST be in the same language as the user query.
+  - Do NOT mix Korean and English for the same concept (e.g., write '운영절차' not '운Operating절차').
+  - Technical acronyms (ITSM, CAB, RFC, etc.) may remain in English.
+```
+
+**References 형식 지시 추가 (Section 4):**
+```
+4. References Section Format:
+  - The References section MUST use the exact heading: `### References`
+  - Use markdown list format only: `- [n] 파일명` — do NOT use a code block.
+  - The filename MUST be copied EXACTLY as it appears in the Reference Document List.
+  - Provide maximum of 5 most relevant citations.
+  - Do not generate anything after the References section.
+```
+
+> **한계:** AWQ 양자화 모델은 한국어 파일명을 자동 번역/변형하는 경향이 있습니다. 프롬프트 지시만으로는 완전히 방지되지 않으므로, 파일명 보존은 반드시 `_replace_references_section()` 후처리 코드 수정(아래 "문제 해결" 섹션 참고)과 병행해야 합니다.
 
 ---
 
@@ -276,10 +303,11 @@ RERANK_BINDING=null
 ### - enable_thinking: false → thinking 완전 비활성화 (직접 vLLM에서만 적용됨)
 ### - /no_think prefix → prompt.py에서 defense-in-depth로 추가
 ### - MAX_TOTAL_TOKENS=4000 → AWQ 모델 garbage 방지 (5,000 토큰 초과 시 garbage 출력)
-### - OPENAI_LLM_MAX_TOKENS=600 → 입력+출력 총 토큰을 ~3,550 이하로 유지 (반복 루프 방지)
+### - OPENAI_LLM_MAX_TOKENS=700 → 입력+출력 총 토큰을 ~3,650 이하로 유지 (반복 루프 방지)
+### - repetition_penalty=1.15 → 토큰 레벨 반복 억제 (직접 vLLM extra_body로 전달)
 ###########################
-OPENAI_LLM_MAX_TOKENS=600
-OPENAI_LLM_EXTRA_BODY={"chat_template_kwargs": {"enable_thinking": false}}
+OPENAI_LLM_MAX_TOKENS=700
+OPENAI_LLM_EXTRA_BODY={"chat_template_kwargs": {"enable_thinking": false}, "repetition_penalty": 1.15}
 MAX_TOTAL_TOKENS=4000
 MAX_ENTITY_TOKENS=1000
 MAX_RELATION_TOKENS=1000
@@ -480,8 +508,100 @@ if not reference_list and kg_file_paths:
 
 **원인:** naive 모드의 입력 토큰(시스템 프롬프트 ~569 + 청크 컨텍스트 ~2,370 = ~2,939 토큰)에 생성 토큰 상한(기본 2,048)을 합산하면 총 ~4,987 토큰으로 AWQ 모델의 반복 루프 임계값을 초과합니다. 생성 중 특정 토큰 수를 넘으면 컨텍스트에 있는 구문("Reference Document List" 등)을 반복합니다.
 
+| `OPENAI_LLM_MAX_TOKENS` | 증상 |
+|------------------------|------|
+| 기본(2048) | "and and and..." 가비지 |
+| 1024 | "Standard Operating Procedures for the Standard Operating Procedures..." 문장 반복 |
+| 700 | ✅ 정상 (완성된 답변 + References) |
+| 600 | 안전하나 응답이 중간에 잘리는 경우 있음 |
+
 **해결:**
 ```env
-OPENAI_LLM_MAX_TOKENS=600
+OPENAI_LLM_MAX_TOKENS=700
+OPENAI_LLM_EXTRA_BODY={"chat_template_kwargs": {"enable_thinking": false}, "repetition_penalty": 1.15}
 ```
-입력(~2,939) + 출력(600) = ~3,539 토큰으로 안전 범위 유지. 600 토큰은 Qwen3의 한국어 기준 약 1,200~1,800자 응답에 해당합니다.
+입력(~2,939) + 출력(700) = ~3,639 토큰으로 안전 범위 유지. 700 토큰은 Qwen3의 한국어 기준 약 1,400~2,100자 응답에 해당합니다. `repetition_penalty=1.15`를 함께 적용하면 토큰 레벨 반복을 추가로 억제합니다.
+
+---
+
+### 증상: References 파일명이 번역/변형됨 (`표준운 operating 절procedure서(배도).pdf`)
+
+**원인:** Qwen3-AWQ 모델이 References 섹션을 생성할 때 한국어 파일명을 글자 단위로 분해하여 영어로 번역하거나 오타를 만들어냅니다. 프롬프트 지시(`"Do NOT translate the filename"`)로는 완전히 방지할 수 없는 AWQ 모델의 한계입니다.
+
+예: `응용프로그램 표준운영절차서(배포).pdf` → `응용프로그램 표준운 operating 절procedure서(배도).pdf`
+
+**해결 (코드 수정, `lightrag/operate.py`):**
+
+LLM이 생성한 References 섹션을 버리고 인덱스에서 읽은 실제 파일명으로 교체하는 후처리 함수를 추가합니다.
+
+**1단계:** `kg_query` 함수 위(line ~3648)에 `_replace_references_section()` 함수 추가:
+
+```python
+def _replace_references_section(response: str, reference_list: list) -> str:
+    """Replace LLM-generated References section with actual filenames from reference_list."""
+    if not reference_list:
+        return response
+
+    ref_heading_pattern = re.compile(
+        r"(?:\n+|\A)#{1,4}\s*(?:References?|참고\s*문헌?|참고\s*문서?)\s*(?:\n|$)",
+        re.IGNORECASE,
+    )
+    last_start = None
+    for m in ref_heading_pattern.finditer(response):
+        last_start = m.start()
+
+    body = response[:last_start].rstrip() if last_start is not None else response.rstrip()
+
+    ref_lines = ["\n\n### References\n"]
+    for ref in reference_list:
+        ref_id = ref.get("reference_id", "")
+        file_path = ref.get("file_path", "")
+        if file_path:
+            ref_lines.append(f"- [{ref_id}] {file_path}")
+
+    return body + "\n".join(ref_lines)
+```
+
+**2단계:** `kg_query` 응답 반환 직전에 후처리 적용:
+
+```python
+# kg_query 함수 내 (line ~3878)
+if isinstance(response, str):
+    # ... 기존 sys_prompt 제거 로직 ...
+    ref_list = context_result.raw_data.get("data", {}).get("references", [])
+    response = _replace_references_section(response, ref_list)
+    return QueryResult(content=response, raw_data=context_result.raw_data)
+```
+
+**3단계:** `naive_query` 응답 반환 직전에도 동일하게 적용:
+
+```python
+# naive_query 함수 내 (line ~5850)
+if isinstance(response, str):
+    # ... 기존 sys_prompt 제거 로직 ...
+    response = _replace_references_section(response, reference_list)
+    return QueryResult(content=response, raw_data=raw_data)
+```
+
+**동작 원리:** `reference_list`는 청크의 `file_path` 필드(파일 업로드 시 저장된 원본 파일명)에서 생성됩니다. LLM 응답에서 `### References`, `## 참고 문헌` 등의 마지막 References 헤딩 이후를 모두 제거하고, 실제 파일명으로 재구성합니다.
+
+이 수정은 `commit 35a5a66`에서 적용되었으며 `knowwheresoft/uiscloud-lightrag:1.5.0-35a5a66` 이미지부터 포함됩니다.
+
+---
+
+### 증상: References가 코드 블록(` ``` `)으로 감싸져 나오거나 형식이 일관되지 않음
+
+**원인:** LLM이 References 섹션을 마크다운 코드 블록으로 렌더링하거나, `### References` 대신 `### 참고 문헌` 등 다양한 헤딩을 임의로 사용합니다.
+
+**해결:** 위의 `_replace_references_section()` 후처리 함수가 함께 해결합니다. 함수가 LLM 생성 References 섹션 전체를 교체하므로 형식이 항상 `### References` + 마크다운 리스트로 통일됩니다.
+
+추가로 `prompt.py`의 `rag_response`와 `naive_rag_response`에 아래 지시를 추가하면 스트리밍 응답에서도 일관된 형식을 유도할 수 있습니다:
+
+```
+4. References Section Format:
+  - The References section MUST use the exact heading: `### References`
+  - Use markdown list format only: `- [n] 파일명` — do NOT use a code block for the References section.
+  - The filename MUST be copied EXACTLY as it appears in the Reference Document List.
+  - Provide maximum of 5 most relevant citations.
+  - Do not generate anything after the References section.
+```
