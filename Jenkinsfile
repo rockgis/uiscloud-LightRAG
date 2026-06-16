@@ -88,9 +88,15 @@ pipeline {
 
                         cp docker-compose.yml ${params.DEPLOY_DIR}/docker-compose.yml
 
-                        # root 소유 .env 제거 후 새로 생성 (bind-mount 잔재 대응)
-                        sudo rm -f ${params.DEPLOY_DIR}/.env 2>/dev/null || rm -f ${params.DEPLOY_DIR}/.env 2>/dev/null || true
-                        cp \$ENV_FILE ${params.DEPLOY_DIR}/.env
+                        # .env: 서버에 이미 존재하면 유지, 없을 때만 credentials에서 복사
+                        # (운영 중 수동 변경된 설정을 배포가 덮어쓰는 것을 방지)
+                        if [ ! -f "${params.DEPLOY_DIR}/.env" ]; then
+                            sudo rm -f ${params.DEPLOY_DIR}/.env 2>/dev/null || true
+                            cp \$ENV_FILE ${params.DEPLOY_DIR}/.env
+                            echo ".env: credentials에서 신규 생성"
+                        else
+                            echo ".env: 서버 기존 파일 유지 (변경하려면 서버에서 직접 수정 후 docker compose up -d --force-recreate)"
+                        fi
 
                         cd ${params.DEPLOY_DIR}
                         docker pull ${env.IMAGE_NAME}:${env.IMAGE_TAG}
