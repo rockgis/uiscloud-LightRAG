@@ -4467,6 +4467,19 @@ async def _apply_token_truncation(
         f"Before truncation: {len(entities_context)} entities, {len(relations_context)} relations"
     )
 
+    # Collect unique file paths from KG data before file_path is removed during truncation.
+    # Used as citation fallback when token budget leaves no room for text chunks.
+    kg_file_paths = []
+    seen_kg_paths: set = set()
+    for _item in (*entities_context, *relations_context):
+        fp = _item.get("file_path", "")
+        if fp and fp != "unknown_source":
+            for _path in fp.split(GRAPH_FIELD_SEP):
+                _path = _path.strip()
+                if _path and _path not in seen_kg_paths:
+                    kg_file_paths.append(_path)
+                    seen_kg_paths.add(_path)
+
     # Apply token-based truncation
     if entities_context:
         # Remove file_path and created_at for token calculation
@@ -4544,6 +4557,7 @@ async def _apply_token_truncation(
         "filtered_relations": filtered_relations,
         "entity_id_to_original": filtered_entity_id_to_original,
         "relation_id_to_original": filtered_relation_id_to_original,
+        "kg_file_paths": kg_file_paths,
     }
 
 
@@ -4659,6 +4673,7 @@ async def _build_context_str(
     chunk_tracking: dict = None,
     entity_id_to_original: dict = None,
     relation_id_to_original: dict = None,
+    kg_file_paths: list = None,
 ) -> tuple[str, dict[str, Any]]:
     """
     Build the final LLM context string with token processing.
@@ -4768,6 +4783,21 @@ async def _build_context_str(
         for ref in reference_list
         if ref["reference_id"]
     )
+
+    # Fallback: when token budget leaves no room for text chunks, build references
+    # from KG entity/relation file_paths so the LLM doesn't output placeholder text.
+    if not reference_list and kg_file_paths:
+        reference_list = [
+            {"reference_id": str(i + 1), "file_path": fp}
+            for i, fp in enumerate(kg_file_paths)
+        ]
+        reference_list_str = "\n".join(
+            f"[{ref['reference_id']}] {ref['file_path']}"
+            for ref in reference_list
+        )
+        logger.debug(
+            f"Reference fallback: built {len(reference_list)} refs from KG file_paths"
+        )
 
     logger.info(
         f"Final context: {len(entities_context)} entities, {len(relations_context)} relations, {len(chunks_context)} chunks"
@@ -4914,6 +4944,7 @@ async def _build_query_context(
         chunk_tracking=search_result["chunk_tracking"],
         entity_id_to_original=truncation_result["entity_id_to_original"],
         relation_id_to_original=truncation_result["relation_id_to_original"],
+        kg_file_paths=truncation_result.get("kg_file_paths", []),
     )
 
     # Convert keywords strings to lists and add complete metadata to raw_data
