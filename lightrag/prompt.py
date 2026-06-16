@@ -526,26 +526,25 @@ Consider the conversation history if provided to maintain conversational flow an
   - If the answer cannot be found in the **Context**, state that you do not have enough information to answer. Do not attempt to guess.
 
 3. Formatting & Language:
-  - The response MUST be in the same language as the user query.
+  - The response MUST be in the same language as the user query. If the query is in Korean, write the ENTIRE response in Korean.
+  - Do NOT mix Korean and English for the same concept (e.g., write '운영절차' not '운Operating절차', write '배포' not 'Deployment'). Technical acronyms (ITSM, CAB, RFC, etc.) may remain in English.
   - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
   - The response should be presented in {response_type}.
 
 4. References Section Format:
-  - The References section should be under heading: `### References`
-  - Reference list entries should adhere to the format: `* [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
-  - The Document Title in the citation must retain its original language.
-  - Output each citation on an individual line
+  - The References section MUST use the exact heading: `### References`
+  - Use markdown list format only: `- [n] 파일명` — do NOT use a code block for the References section.
+  - The filename MUST be copied EXACTLY character-by-character as it appears in the `Reference Document List`. Do NOT translate, romanize, shorten, or modify the filename in any way.
+  - Output each citation on an individual line.
   - Provide maximum of 5 most relevant citations.
-  - Do not generate footnotes section or any comment, summary, or explanation after the references.
+  - Do not generate anything after the References section.
 
 5. Reference Section Example:
-```
+
 ### References
 
-- [1] Document Title One
-- [2] Document Title Two
-- [3] Document Title Three
-```
+- [1] 응용프로그램 표준운영절차서(배포).pdf
+- [2] 범정부 정보시스템 표준운영절차서(배포).pdf
 
 6. Additional Instructions: {user_prompt}
 
@@ -581,26 +580,25 @@ Consider the conversation history if provided to maintain conversational flow an
   - If the answer cannot be found in the **Context**, state that you do not have enough information to answer. Do not attempt to guess.
 
 3. Formatting & Language:
-  - The response MUST be in the same language as the user query.
+  - The response MUST be in the same language as the user query. If the query is in Korean, write the ENTIRE response in Korean.
+  - Do NOT mix Korean and English for the same concept (e.g., write '운영절차' not '운Operating절차', write '배포' not 'Deployment'). Technical acronyms (ITSM, CAB, RFC, etc.) may remain in English.
   - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
   - The response should be presented in {response_type}.
 
 4. References Section Format:
-  - The References section should be under heading: `### References`
-  - Reference list entries should adhere to the format: `* [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
-  - The Document Title in the citation must retain its original language.
-  - Output each citation on an individual line
+  - The References section MUST use the exact heading: `### References`
+  - Use markdown list format only: `- [n] 파일명` — do NOT use a code block for the References section.
+  - The filename MUST be copied EXACTLY character-by-character as it appears in the `Reference Document List`. Do NOT translate, romanize, shorten, or modify the filename in any way.
+  - Output each citation on an individual line.
   - Provide maximum of 5 most relevant citations.
-  - Do not generate footnotes section or any comment, summary, or explanation after the references.
+  - Do not generate anything after the References section.
 
 5. Reference Section Example:
-```
+
 ### References
 
-- [1] Document Title One
-- [2] Document Title Two
-- [3] Document Title Three
-```
+- [1] 응용프로그램 표준운영절차서(배포).pdf
+- [2] 범정부 정보시스템 표준운영절차서(배포).pdf
 
 6. Additional Instructions: {user_prompt}
 

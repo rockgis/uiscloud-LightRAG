@@ -3645,6 +3645,37 @@ async def extract_entities(
     return chunk_results
 
 
+def _replace_references_section(response: str, reference_list: list) -> str:
+    """Replace LLM-generated References section with actual filenames from reference_list.
+
+    AWQ models tend to translate or corrupt Korean filenames. This post-processing
+    step guarantees the References section contains exact filenames from the index.
+    """
+    if not reference_list:
+        return response
+
+    # Match last occurrence of any References heading (English or Korean variants)
+    ref_heading_pattern = re.compile(
+        r"(?:\n+|\A)#{1,4}\s*(?:References?|참고\s*문헌?|참고\s*문서?)\s*(?:\n|$)",
+        re.IGNORECASE,
+    )
+
+    last_start = None
+    for m in ref_heading_pattern.finditer(response):
+        last_start = m.start()
+
+    body = response[:last_start].rstrip() if last_start is not None else response.rstrip()
+
+    ref_lines = ["\n\n### References\n"]
+    for ref in reference_list:
+        ref_id = ref.get("reference_id", "")
+        file_path = ref.get("file_path", "")
+        if file_path:
+            ref_lines.append(f"- [{ref_id}] {file_path}")
+
+    return body + "\n".join(ref_lines)
+
+
 async def kg_query(
     query: str,
     knowledge_graph_inst: BaseGraphStorage,
@@ -3844,6 +3875,8 @@ async def kg_query(
                 .strip()
             )
 
+        ref_list = context_result.raw_data.get("data", {}).get("references", [])
+        response = _replace_references_section(response, ref_list)
         return QueryResult(content=response, raw_data=context_result.raw_data)
     else:
         # Streaming response (AsyncIterator)
@@ -5815,6 +5848,7 @@ async def naive_query(
                 .strip()
             )
 
+        response = _replace_references_section(response, reference_list)
         return QueryResult(content=response, raw_data=raw_data)
     else:
         # Streaming response (AsyncIterator)
