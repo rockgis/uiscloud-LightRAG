@@ -94,7 +94,8 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
 {examples}
 """
 
-PROMPTS["entity_extraction_user_prompt"] = """---Task---
+PROMPTS["entity_extraction_user_prompt"] = """/no_think
+---Task---
 Extract entities and relationships from the `---Input Text---` session below.
 
 ---Instructions---
@@ -112,7 +113,8 @@ Extract entities and relationships from the `---Input Text---` session below.
 ---Output---
 """
 
-PROMPTS["entity_continue_extraction_user_prompt"] = """---Task---
+PROMPTS["entity_continue_extraction_user_prompt"] = """/no_think
+---Task---
 Based on the last extraction task, identify and extract any missed or incorrectly formatted entities and relationships from the input text.
 
 ---Instructions---
@@ -131,6 +133,29 @@ Based on the last extraction task, identify and extract any missed or incorrectl
 """
 
 PROMPTS["entity_extraction_examples"] = [
+    """---Entity Types---
+- Organization: Companies, institutions, government bodies, groups
+- Method: Procedures, techniques, algorithms, workflows
+- Artifact: Physical or digital objects created by humans (tools, software, devices)
+- Concept: Abstract ideas, theories, principles, beliefs
+
+---Input Text---
+```
+변경관리 절차서는 응용프로그램 변경작업으로 인한 서비스 영향과 위험 발생을 최소화하고, 효율적인 변경처리를 위한 방법과 절차를 표준화한다. 운영기관은 ITSM 시스템을 통해 변경 요청(RFC)을 등록하고, 변경관리위원회(CAB)의 승인을 받아야 한다.
+```
+
+---Output---
+entity{tuple_delimiter}변경관리 절차서{tuple_delimiter}Method{tuple_delimiter}응용프로그램 변경작업으로 인한 서비스 영향과 위험을 최소화하기 위한 표준화된 변경 처리 절차
+entity{tuple_delimiter}운영기관{tuple_delimiter}Organization{tuple_delimiter}ITSM 시스템을 통해 변경 요청을 등록하고 변경관리위원회 승인을 받는 기관
+entity{tuple_delimiter}ITSM 시스템{tuple_delimiter}Artifact{tuple_delimiter}변경 요청(RFC)을 등록하고 관리하는 IT 서비스 관리 시스템
+entity{tuple_delimiter}변경관리위원회(CAB){tuple_delimiter}Organization{tuple_delimiter}변경 요청에 대한 검토 및 승인을 담당하는 위원회
+entity{tuple_delimiter}변경 요청(RFC){tuple_delimiter}Concept{tuple_delimiter}응용프로그램 변경을 요청하는 공식 문서
+relation{tuple_delimiter}운영기관{tuple_delimiter}ITSM 시스템{tuple_delimiter}등록{tuple_delimiter}운영기관은 ITSM 시스템을 통해 변경 요청을 등록한다
+relation{tuple_delimiter}운영기관{tuple_delimiter}변경관리위원회(CAB){tuple_delimiter}승인{tuple_delimiter}운영기관은 변경관리위원회의 승인을 받아야 한다
+{completion_delimiter}
+""",
+]
+PROMPTS["_entity_extraction_examples_disabled"] = [
     """---Entity Types---
 - Person: Human individuals, real or fictional
 - Artifact: Physical or digital objects created by humans (tools, software, devices)
@@ -228,7 +253,7 @@ relation{tuple_delimiter}NASBench-360{tuple_delimiter}GPU-Hours{tuple_delimiter}
 {completion_delimiter}
 
 """,
-]
+]  # end of _entity_extraction_examples_disabled
 
 ###############################################################################
 # JSON Structured Output Prompts for Entity Extraction
@@ -475,7 +500,8 @@ PROMPTS["fail_response"] = (
     "Sorry, I'm not able to provide an answer to that question.[no-context]"
 )
 
-PROMPTS["rag_response"] = """---Role---
+PROMPTS["rag_response"] = """/no_think
+---Role---
 
 You are an expert AI assistant specializing in synthesizing information from a provided knowledge base. Your primary function is to answer user queries accurately by ONLY using the information within the provided **Context**.
 
@@ -529,7 +555,8 @@ Consider the conversation history if provided to maintain conversational flow an
 {context_data}
 """
 
-PROMPTS["naive_rag_response"] = """---Role---
+PROMPTS["naive_rag_response"] = """/no_think
+---Role---
 
 You are an expert AI assistant specializing in synthesizing information from a provided knowledge base. Your primary function is to answer user queries accurately by ONLY using the information within the provided **Context**.
 
@@ -625,7 +652,8 @@ Reference Document List (Each entry starts with a [reference_id] that correspond
 
 """
 
-PROMPTS["keywords_extraction"] = """---Role---
+PROMPTS["keywords_extraction"] = """/no_think
+---Role---
 You are an expert keyword extractor, specializing in analyzing user queries for a Retrieval-Augmented Generation (RAG) system. Your purpose is to identify both high-level and low-level keywords in the user's query that will be used for effective document retrieval.
 
 ---Goal---
