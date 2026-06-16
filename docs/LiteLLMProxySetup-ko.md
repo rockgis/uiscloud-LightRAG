@@ -83,7 +83,7 @@ Qwen3-30B-A3B-awq 등 AWQ 양자화 모델은 **긴 system prompt에서 garbage 
 
 LightRAG의 기본 설정(`MAX_TOTAL_TOKENS=30,000`)에서는 KG 컨텍스트가 포함된 system prompt가 22,000 토큰을 초과할 수 있어 모든 쿼리 응답이 garbage로 반환됩니다.
 
-### 해결책 1: 컨텍스트 예산 제한
+### 해결책 1: 컨텍스트 예산 및 생성 토큰 제한
 
 `.env`에 다음을 추가합니다:
 
@@ -91,10 +91,12 @@ LightRAG의 기본 설정(`MAX_TOTAL_TOKENS=30,000`)에서는 KG 컨텍스트가
 MAX_TOTAL_TOKENS=4000      # 총 컨텍스트 예산 (기본 30,000 → 4,000)
 MAX_ENTITY_TOKENS=1000     # 엔티티 컨텍스트 상한 (기본 6,000 → 1,000)
 MAX_RELATION_TOKENS=1000   # 관계 컨텍스트 상한 (기본 8,000 → 1,000)
-OPENAI_LLM_MAX_TOKENS=2048 # 생성 토큰 상한
+OPENAI_LLM_MAX_TOKENS=600  # 생성 토큰 상한 (반복 루프 방지)
 ```
 
-이 설정으로 system prompt를 ~4,000 토큰 이하로 유지합니다.
+이 설정으로 system prompt를 ~4,000 토큰 이하로 유지하고, 생성 토큰 상한을 600으로 제한해 총 시퀀스 길이(입력+출력)가 AWQ 모델의 안정 임계값(~4,600 토큰)을 넘지 않도록 합니다.
+
+> **왜 600인가?** Qwen3-AWQ는 총 토큰 수(입력+출력)가 ~3,500~5,000 범위를 넘으면 반복 루프(garbage 또는 동일 문구 반복) 증상이 나타납니다. naive 모드 기준 입력 ~2,950 토큰 + 출력 600 토큰 = ~3,550 토큰으로 안전 범위 내에 유지됩니다.
 
 ### 해결책 2: Thinking 완전 비활성화 (AWQ 권장)
 
@@ -274,8 +276,9 @@ RERANK_BINDING=null
 ### - enable_thinking: false → thinking 완전 비활성화 (직접 vLLM에서만 적용됨)
 ### - /no_think prefix → prompt.py에서 defense-in-depth로 추가
 ### - MAX_TOTAL_TOKENS=4000 → AWQ 모델 garbage 방지 (5,000 토큰 초과 시 garbage 출력)
+### - OPENAI_LLM_MAX_TOKENS=600 → 입력+출력 총 토큰을 ~3,550 이하로 유지 (반복 루프 방지)
 ###########################
-OPENAI_LLM_MAX_TOKENS=2048
+OPENAI_LLM_MAX_TOKENS=600
 OPENAI_LLM_EXTRA_BODY={"chat_template_kwargs": {"enable_thinking": false}}
 MAX_TOTAL_TOKENS=4000
 MAX_ENTITY_TOKENS=1000
@@ -434,5 +437,51 @@ docker compose up -d --force-recreate
 
 ### 증상: Local/Hybrid 모드 References가 "Document Title One/Two/Three" 표시
 
-**원인:** KG 기반 모드(local/hybrid)에서 청크 소스 파일명이 프롬프트 placeholder로 대체됨.  
-**상태:** 기능 이상은 아니며, 쿼리 응답 내용 자체는 정확. 문서 소스 표시 개선 필요 시 `lightrag/operate.py`의 references 생성 로직 확인 필요.
+**원인:** `MAX_TOTAL_TOKENS=4000` 환경에서 local/hybrid 모드는 KG 데이터(엔티티/관계, ~2,200 토큰) + 시스템 프롬프트(~900 토큰) 처리 후 청크(chunk)에 할당되는 예산이 ~685 토큰으로 부족 → 청크 0개 선택 → `reference_list` 빈값 → LLM이 프롬프트 예시 텍스트("Document Title One/Two/Three")를 그대로 출력.
+
+**해결 (코드 수정, `lightrag/operate.py`):**
+
+청크가 없을 때 KG 엔티티/관계의 `file_path`를 폴백 references로 사용하도록 수정합니다.
+
+1. `_apply_token_truncation()` 함수 내 — 토큰 절삭 전에 `kg_file_paths` 수집:
+```python
+kg_file_paths = []
+seen_kg_paths: set = set()
+for _item in (*entities_context, *relations_context):
+    fp = _item.get("file_path", "")
+    if fp and fp != "unknown_source":
+        for _path in fp.split(GRAPH_FIELD_SEP):
+            _path = _path.strip()
+            if _path and _path not in seen_kg_paths:
+                kg_file_paths.append(_path)
+                seen_kg_paths.add(_path)
+# 반환 딕셔너리에 추가
+return { ..., "kg_file_paths": kg_file_paths }
+```
+
+2. `_build_context_str()` 함수 내 — `reference_list`가 비어있을 때 폴백:
+```python
+if not reference_list and kg_file_paths:
+    reference_list = [
+        {"reference_id": str(i + 1), "file_path": fp}
+        for i, fp in enumerate(kg_file_paths)
+    ]
+    reference_list_str = "\n".join(
+        f"[{ref['reference_id']}] {ref['file_path']}"
+        for ref in reference_list
+    )
+```
+
+이 수정은 `commit cf0717f`에서 적용되었으며 `knowwheresoft/uiscloud-lightrag:1.5.0-cf0717f` 이미지부터 포함됩니다.
+
+---
+
+### 증상: Naive 모드 응답 끝에 반복 garbage ("and and and..." 또는 "Reference Document List" 반복)
+
+**원인:** naive 모드의 입력 토큰(시스템 프롬프트 ~569 + 청크 컨텍스트 ~2,370 = ~2,939 토큰)에 생성 토큰 상한(기본 2,048)을 합산하면 총 ~4,987 토큰으로 AWQ 모델의 반복 루프 임계값을 초과합니다. 생성 중 특정 토큰 수를 넘으면 컨텍스트에 있는 구문("Reference Document List" 등)을 반복합니다.
+
+**해결:**
+```env
+OPENAI_LLM_MAX_TOKENS=600
+```
+입력(~2,939) + 출력(600) = ~3,539 토큰으로 안전 범위 유지. 600 토큰은 Qwen3의 한국어 기준 약 1,200~1,800자 응답에 해당합니다.
