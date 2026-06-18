@@ -3645,15 +3645,73 @@ async def extract_entities(
     return chunk_results
 
 
+_GARBAGE_PATTERNS = [
+    re.compile(r"[A-Za-z]{3,}[가-힣]"),   # English directly attached to Korean (no space)
+    re.compile(r"[가-힣][A-Za-z]{3,}"),   # Korean directly attached to English (no space)
+    re.compile(r"[!?~]{3,}"),             # 3+ repeated punctuation
+    re.compile(r"\|{2,}"),                # 2+ consecutive pipe chars
+    re.compile(r"[A-Z_]{5,}"),            # ALL_CAPS_IDENTIFIER (5+ chars)
+    re.compile(r"[_]{3,}"),               # 3+ underscores in a row
+]
+
+
+def _trim_garbage_tail(body: str) -> str:
+    """Remove garbage characters that appear at the end of AWQ model output.
+
+    AWQ-quantized models (Qwen3-AWQ, EXAONE-AWQ) may produce character-soup
+    garbage when approaching max_tokens. Two garbage styles are detected:
+
+    - Qwen3-style: pure exotic character soup (math symbols, Greek, Cyrillic)
+    - EXAONE-style: Korean + random ASCII/code junk (underscores, pipes, ALL_CAPS)
+    """
+    lines = body.split("\n")
+    result = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            result.append(line)
+            continue
+
+        total = len(stripped)
+        korean = sum(
+            1
+            for c in stripped
+            if "가" <= c <= "힣" or "㄰" <= c <= "㆏"
+        )
+        # "Exotic": non-ASCII, non-Korean, non-standard CJK, non-digit
+        exotic = sum(
+            1
+            for c in stripped
+            if not c.isascii()
+            and not ("가" <= c <= "힣")
+            and not ("㄰" <= c <= "㆏")
+            and not ("一" <= c <= "鿿")
+            and not c.isdigit()
+        )
+
+        # Qwen3-style: high exotic ratio, almost no Korean
+        if total > 15 and exotic / total > 0.25 and korean / total < 0.1:
+            break
+
+        # EXAONE-style: long line with multiple code-junk patterns mixed into Korean
+        if total > 40 and korean > 0:
+            pattern_hits = sum(1 for p in _GARBAGE_PATTERNS if p.search(stripped))
+            if pattern_hits >= 2:
+                break
+
+        result.append(line)
+
+    return "\n".join(result).rstrip()
+
+
 def _replace_references_section(response: str, reference_list: list) -> str:
     """Replace LLM-generated References section with actual filenames from reference_list.
 
     AWQ models tend to translate or corrupt Korean filenames. This post-processing
     step guarantees the References section contains exact filenames from the index.
+    Also removes garbage tail characters produced by AWQ models at max_tokens.
     """
-    if not reference_list:
-        return response
-
     # Match last occurrence of any References heading (English or Korean variants)
     ref_heading_pattern = re.compile(
         r"(?:\n+|\A)#{1,4}\s*(?:References?|참고\s*문헌?|참고\s*문서?)\s*(?:\n|$)",
@@ -3665,6 +3723,12 @@ def _replace_references_section(response: str, reference_list: list) -> str:
         last_start = m.start()
 
     body = response[:last_start].rstrip() if last_start is not None else response.rstrip()
+
+    # Remove garbage tail produced by AWQ models at max_tokens boundary
+    body = _trim_garbage_tail(body)
+
+    if not reference_list:
+        return body
 
     ref_lines = ["\n\n### References\n"]
     for ref in reference_list:
