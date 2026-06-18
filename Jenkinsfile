@@ -85,13 +85,14 @@ pipeline {
                 withCredentials([file(credentialsId: 'env-file-lightrag', variable: 'ENV_FILE')]) {
                     sh """
                         mkdir -p ${params.DEPLOY_DIR}/data/{rag_storage,inputs,prompts}
+                        mkdir -p ${params.DEPLOY_DIR}/override
 
                         cp docker-compose.yml ${params.DEPLOY_DIR}/docker-compose.yml
 
                         # .env: 서버에 이미 존재하면 유지, 없을 때만 credentials에서 복사
                         # (운영 중 수동 변경된 설정을 배포가 덮어쓰는 것을 방지)
                         if [ ! -f "${params.DEPLOY_DIR}/.env" ]; then
-                            sudo rm -f ${params.DEPLOY_DIR}/.env 2>/dev/null || true
+                            rm -f ${params.DEPLOY_DIR}/.env 2>/dev/null || true
                             cp \$ENV_FILE ${params.DEPLOY_DIR}/.env
                             echo ".env: credentials에서 신규 생성"
                         else
@@ -103,6 +104,29 @@ pipeline {
                         sed -i 's|image: .*lightrag.*|image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}|g' docker-compose.yml
                         docker compose down --timeout 30 || true
                         docker compose up -d
+
+                        # override 디렉토리의 파일을 컨테이너에 적용
+                        # 컨테이너가 완전히 시작될 때까지 대기 (최대 30초)
+                        CONTAINER_NAME=\$(docker compose ps -q lightrag 2>/dev/null | head -1)
+                        if [ -n "\$CONTAINER_NAME" ]; then
+                            for i in \$(seq 1 6); do
+                                STATUS=\$(docker inspect --format='{{.State.Status}}' "\$CONTAINER_NAME" 2>/dev/null || true)
+                                [ "\$STATUS" = "running" ] && break
+                                sleep 5
+                            done
+                            APPLIED=0
+                            for f in operate.py prompt.py; do
+                                if [ -f "${params.DEPLOY_DIR}/override/\$f" ]; then
+                                    docker cp "${params.DEPLOY_DIR}/override/\$f" "\$CONTAINER_NAME:/app/lightrag/\$f"
+                                    echo "Override applied: \$f"
+                                    APPLIED=1
+                                fi
+                            done
+                            if [ "\$APPLIED" = "1" ]; then
+                                docker restart "\$CONTAINER_NAME"
+                                echo "Container restarted with override files"
+                            fi
+                        fi
 
                         echo "Deploy completed: ${env.IMAGE_TAG}"
                     """
