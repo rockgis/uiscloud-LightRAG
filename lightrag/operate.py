@@ -3652,6 +3652,10 @@ _GARBAGE_PATTERNS = [
     re.compile(r"\|{2,}"),                # 2+ consecutive pipe chars
     re.compile(r"[A-Z_]{5,}"),            # ALL_CAPS_IDENTIFIER (5+ chars)
     re.compile(r"[_]{3,}"),               # 3+ underscores in a row
+    re.compile(r"[,;]{3,}"),              # 3+ consecutive commas/semicolons
+    re.compile(r"""["']{3,}"""),          # 3+ consecutive quotes (""" or ''')
+    re.compile(r"\\{2,}"),               # 2+ consecutive backslashes
+    re.compile(r"[—–]{2,}"),             # 2+ consecutive em/en dashes
 ]
 
 
@@ -3659,10 +3663,11 @@ def _trim_garbage_tail(body: str) -> str:
     """Remove garbage characters that appear at the end of AWQ model output.
 
     AWQ-quantized models (Qwen3-AWQ, EXAONE-AWQ) may produce character-soup
-    garbage when approaching max_tokens. Two garbage styles are detected:
+    garbage when approaching max_tokens. Garbage styles detected:
 
     - Qwen3-style: pure exotic character soup (math symbols, Greek, Cyrillic)
     - EXAONE-style: Korean + random ASCII/code junk (underscores, pipes, ALL_CAPS)
+    - English word-salad: very long line with almost no Korean (naive mode)
     """
     lines = body.split("\n")
     result = []
@@ -3699,6 +3704,10 @@ def _trim_garbage_tail(body: str) -> str:
             pattern_hits = sum(1 for p in _GARBAGE_PATTERNS if p.search(stripped))
             if pattern_hits >= 2:
                 break
+
+        # English word-salad appended to Korean content: very long line, <5% Korean
+        if total > 500 and korean > 0 and korean < total // 20:
+            break
 
         result.append(line)
 
