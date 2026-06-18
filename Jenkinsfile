@@ -103,7 +103,7 @@ pipeline {
                         docker pull ${env.IMAGE_NAME}:${env.IMAGE_TAG}
                         sed -i 's|image: .*lightrag.*|image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}|g' docker-compose.yml
                         docker compose down --timeout 30 || true
-                        docker compose up -d
+                        docker compose up -d --no-build
 
                         # override 디렉토리의 파일을 컨테이너에 적용
                         # 컨테이너가 완전히 시작될 때까지 대기 (최대 30초)
@@ -172,10 +172,10 @@ pipeline {
                 echo "Deployment FAILED -- attempting rollback"
                 def prevTag = sh(
                     script: """
-                        docker images ${env.IMAGE_NAME} --format '{{.Tag}}' \
+                        docker images ${env.IMAGE_NAME} --format '{{.CreatedAt}} {{.Tag}}' \
                             | grep -v latest \
                             | grep -v '${env.IMAGE_TAG}' \
-                            | sort -r | head -1
+                            | sort -r | head -1 | awk '{print \$NF}'
                     """,
                     returnStdout: true
                 ).trim()
