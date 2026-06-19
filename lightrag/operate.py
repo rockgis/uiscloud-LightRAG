@@ -3658,6 +3658,7 @@ _GARBAGE_PATTERNS = [
     re.compile(r"[—–]{2,}"),             # 2+ consecutive em/en dashes
     re.compile(r"[><=!]{2,}"),           # 2+ consecutive comparison/arrow operators (=>, >>, <=)
     re.compile(r"[(){}\[\]]{2,}"),       # 2+ consecutive code brackets (){ , {}, [])
+    re.compile(r"\.{2,}"),              # 2+ consecutive dots (…… or ...)
 ]
 
 
@@ -3706,6 +3707,11 @@ def _trim_garbage_tail(body: str) -> str:
             pattern_hits = sum(1 for p in _GARBAGE_PATTERNS if p.search(stripped))
             if pattern_hits >= 2:
                 break
+
+        # Non-Korean lines with 2+ exotic chars (Japanese punctuation, math symbols, etc.)
+        # — e.g. 「Discussion」, 、용어、 appended after Korean content
+        if total > 5 and korean == 0 and exotic >= 2:
+            break
 
         # English word-salad appended to Korean content: very long line, <5% Korean
         if total > 500 and korean > 0 and korean < total // 20:
