@@ -3710,9 +3710,15 @@ def _trim_garbage_tail(body: str) -> str:
 
         # Non-Korean lines with Japanese punctuation (definite garbage in Korean docs)
         # — e.g. 「Discussion」, 、Discussion」 appended after Korean content
-        # Note: broad exotic>=2 check avoided to prevent false positives with emojis
         if total > 5 and korean == 0 and re.search(r"[、。「」『』【】〔〕]", stripped):
             break
+
+        # ASCII-only consonant soup with no Korean (e.g. "s btlz tutp tm wif fd tr sgdn gf")
+        # Real English has vowel ratio ~35%+; random char soup is typically <12%
+        if total > 15 and korean == 0 and exotic == 0:
+            non_space = [c for c in stripped if not c.isspace()]
+            if non_space and sum(1 for c in non_space if c.lower() in "aeiou") / len(non_space) < 0.12:
+                break
 
         # English word-salad appended to Korean content: very long line, <5% Korean
         if total > 500 and korean > 0 and korean < total // 20:
