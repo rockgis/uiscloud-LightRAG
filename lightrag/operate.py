@@ -3720,6 +3720,12 @@ def _trim_garbage_tail(body: str) -> str:
             if non_space and sum(1 for c in non_space if c.lower() in "aeiou") / len(non_space) < 0.12:
                 break
 
+        # Lines that start with natural English sentence words followed by Korean
+        # — e.g. "My work is quite broad indeed - 여기가 아직도..." (LLM switching language)
+        # Technical terms like "WebSocket API를" are excluded (WebSocket has mixed case)
+        if korean > 0 and re.search(r"^[A-Z][a-z]+(?:\s+[a-z]+){2,}\s", stripped):
+            break
+
         # English word-salad appended to Korean content: very long line, <5% Korean
         if total > 500 and korean > 0 and korean < total // 20:
             break
