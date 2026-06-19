@@ -3674,6 +3674,7 @@ def _trim_garbage_tail(body: str) -> str:
     """
     lines = body.split("\n")
     result = []
+    seen_korean_chars = 0  # track accumulated Korean content to guard against early false positives
 
     for line in lines:
         stripped = line.strip()
@@ -3722,9 +3723,12 @@ def _trim_garbage_tail(body: str) -> str:
 
         # Lines that start with natural English sentence words followed by Korean
         # — e.g. "My work is quite broad indeed - 여기가 아직도..." (LLM switching language)
-        # Technical terms like "WebSocket API를" are excluded (WebSocket has mixed case)
-        if korean > 0 and re.search(r"^[A-Z][a-z]+(?:\s+[a-z]+){2,}\s", stripped):
+        # Only apply after >50 Korean chars seen, to avoid trimming English preamble lines
+        # Technical terms like "WebSocket API를" are safe — WebSocket has mixed case
+        if korean > 0 and seen_korean_chars > 50 and re.search(r"^[A-Z][a-z]+(?:\s+[a-z]+){2,}\s", stripped):
             break
+
+        seen_korean_chars += korean
 
         # English word-salad appended to Korean content: very long line, <5% Korean
         if total > 500 and korean > 0 and korean < total // 20:
