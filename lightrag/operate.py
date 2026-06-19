@@ -3708,9 +3708,10 @@ def _trim_garbage_tail(body: str) -> str:
             if pattern_hits >= 2:
                 break
 
-        # Non-Korean lines with 2+ exotic chars (Japanese punctuation, math symbols, etc.)
-        # — e.g. 「Discussion」, 、용어、 appended after Korean content
-        if total > 5 and korean == 0 and exotic >= 2:
+        # Non-Korean lines with Japanese punctuation (definite garbage in Korean docs)
+        # — e.g. 「Discussion」, 、Discussion」 appended after Korean content
+        # Note: broad exotic>=2 check avoided to prevent false positives with emojis
+        if total > 5 and korean == 0 and re.search(r"[、。「」『』【】〔〕]", stripped):
             break
 
         # English word-salad appended to Korean content: very long line, <5% Korean
