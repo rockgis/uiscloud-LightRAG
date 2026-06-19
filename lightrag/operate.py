@@ -3656,6 +3656,8 @@ _GARBAGE_PATTERNS = [
     re.compile(r"""["']{3,}"""),          # 3+ consecutive quotes (""" or ''')
     re.compile(r"\\{2,}"),               # 2+ consecutive backslashes
     re.compile(r"[—–]{2,}"),             # 2+ consecutive em/en dashes
+    re.compile(r"[><=!]{2,}"),           # 2+ consecutive comparison/arrow operators (=>, >>, <=)
+    re.compile(r"[(){}\[\]]{2,}"),       # 2+ consecutive code brackets (){ , {}, [])
 ]
 
 
@@ -3699,8 +3701,8 @@ def _trim_garbage_tail(body: str) -> str:
         if total > 15 and exotic / total > 0.25 and korean / total < 0.1:
             break
 
-        # EXAONE-style: long line with multiple code-junk patterns mixed into Korean
-        if total > 40 and korean > 0:
+        # EXAONE-style: code-junk patterns mixed into Korean (short or long lines)
+        if total > 8 and korean > 0:
             pattern_hits = sum(1 for p in _GARBAGE_PATTERNS if p.search(stripped))
             if pattern_hits >= 2:
                 break
