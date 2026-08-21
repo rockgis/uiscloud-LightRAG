@@ -3661,12 +3661,15 @@ _GARBAGE_PATTERNS = [
     re.compile(r"\.{2,}"),              # 2+ consecutive dots (…… or ...)
 ]
 
-# CJK Han ideographs glued directly onto Hangul with no space — a multilingual
-# bleed-through artifact seen with Qwen3.8-27B (e.g. "变更" inside "효율적인变更처리를").
-# Legitimate Hanja usage in modern Korean documents is always parenthetical/spaced
-# (e.g. "표준(標準)"), never glued mid-word, so this is safe to strip outright
-# rather than dropping the whole line.
-_GLUED_HANZI_PATTERN = re.compile(r"[一-鿿]+(?=[가-힣])|(?<=[가-힣])[一-鿿]+")
+# Any non-ASCII, non-Hangul script glued directly onto Hangul with no space —
+# a multilingual bleed-through artifact seen with Qwen3.8-27B (e.g. "变更"
+# inside "효율적인变更처리를", or Cyrillic "часть" inside "표준운영절часть").
+# Legitimate foreign-script usage in modern Korean documents is always
+# parenthetical/spaced (e.g. "표준(標準)"), never glued mid-word, so this is
+# safe to strip outright rather than dropping the whole line.
+_GLUED_FOREIGN_SCRIPT_PATTERN = re.compile(
+    r"[^\x00-\x7F가-힣㄰-㆏]+(?=[가-힣])|(?<=[가-힣])[^\x00-\x7F가-힣㄰-㆏]+"
+)
 
 
 def _trim_garbage_tail(body: str) -> str:
@@ -3678,7 +3681,8 @@ def _trim_garbage_tail(body: str) -> str:
     - Qwen3-style: pure exotic character soup (math symbols, Greek, Cyrillic)
     - EXAONE-style: Korean + random ASCII/code junk (underscores, pipes, ALL_CAPS)
     - English word-salad: very long line with almost no Korean (naive mode)
-    - Stray Hanzi: CJK ideographs glued onto Hangul (e.g. Chinese bleed-through)
+    - Stray foreign script: non-Hangul characters glued onto Hangul (e.g.
+      Chinese/Cyrillic bleed-through)
     """
     lines = body.split("\n")
     result = []
@@ -3691,7 +3695,7 @@ def _trim_garbage_tail(body: str) -> str:
             continue
 
         if any("가" <= c <= "힣" for c in stripped):
-            despurred = _GLUED_HANZI_PATTERN.sub("", line)
+            despurred = _GLUED_FOREIGN_SCRIPT_PATTERN.sub("", line)
             if despurred != line:
                 line = despurred
                 stripped = line.strip()
