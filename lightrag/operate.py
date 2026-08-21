@@ -3661,6 +3661,13 @@ _GARBAGE_PATTERNS = [
     re.compile(r"\.{2,}"),              # 2+ consecutive dots (…… or ...)
 ]
 
+# CJK Han ideographs glued directly onto Hangul with no space — a multilingual
+# bleed-through artifact seen with Qwen3.8-27B (e.g. "变更" inside "효율적인变更처리를").
+# Legitimate Hanja usage in modern Korean documents is always parenthetical/spaced
+# (e.g. "표준(標準)"), never glued mid-word, so this is safe to strip outright
+# rather than dropping the whole line.
+_GLUED_HANZI_PATTERN = re.compile(r"[一-鿿]+(?=[가-힣])|(?<=[가-힣])[一-鿿]+")
+
 
 def _trim_garbage_tail(body: str) -> str:
     """Remove garbage characters that appear at the end of AWQ model output.
@@ -3671,6 +3678,7 @@ def _trim_garbage_tail(body: str) -> str:
     - Qwen3-style: pure exotic character soup (math symbols, Greek, Cyrillic)
     - EXAONE-style: Korean + random ASCII/code junk (underscores, pipes, ALL_CAPS)
     - English word-salad: very long line with almost no Korean (naive mode)
+    - Stray Hanzi: CJK ideographs glued onto Hangul (e.g. Chinese bleed-through)
     """
     lines = body.split("\n")
     result = []
@@ -3681,6 +3689,12 @@ def _trim_garbage_tail(body: str) -> str:
         if not stripped:
             result.append(line)
             continue
+
+        if any("가" <= c <= "힣" for c in stripped):
+            despurred = _GLUED_HANZI_PATTERN.sub("", line)
+            if despurred != line:
+                line = despurred
+                stripped = line.strip()
 
         total = len(stripped)
         korean = sum(
