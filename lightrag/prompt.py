@@ -40,7 +40,7 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
   - For each entity, extract:
     - `entity_name`: The name of the entity. If the entity name is case-insensitive, capitalize the first letter of each significant word (title case). Ensure **consistent naming** across the entire extraction process.
     - `entity_type`: Categorize the entity using the type guidance provided in the `---Entity Types---` section below. If none of the provided entity types apply, classify it as `Other`.
-    - `entity_description`: Provide a concise yet comprehensive description of the entity's attributes and activities, based *solely* on the information present in the input text.
+    - `entity_description`: Provide a concise yet comprehensive description of the entity's attributes and activities, based *solely* on the information present in the input text. If the input text only names the entity without describing it (e.g., it appears in a list with no elaboration), the `entity_description` must say only that — do NOT invent a plausible-sounding role, purpose, or definition for it from general knowledge.
 
 2. **Relationship Extraction:**
   - Identify direct, clearly stated, and meaningful relationships between previously extracted entities.
@@ -471,6 +471,7 @@ Your task is to synthesize a list of descriptions of a given entity or relation 
 1. Input Format: The description list is provided in JSON format. Each JSON object (representing a single description) appears on a new line within the `Description List` section.
 2. Output Format: The merged description will be returned as plain text, presented in multiple paragraphs, without any additional formatting or extraneous comments before or after the summary.
 3. Comprehensiveness: The summary must integrate all key information from *every* provided description. Do not omit any important facts or details.
+3.5. Grounding: Do NOT introduce any fact, role, purpose, or elaboration that is not present in the `Description List`. If a description merely names the entity with little or no detail, the summary should reflect that same lack of detail rather than inventing plausible-sounding content to make the summary seem more complete.
 4. Context: Ensure the summary is written from an objective, third-person perspective; explicitly mention the name of the entity or relation for full clarity and context.
 5. Context & Objectivity:
   - Write the summary from an objective, third-person perspective.
@@ -523,6 +524,10 @@ Consider the conversation history if provided to maintain conversational flow an
 
 2. Content & Grounding:
   - Strictly adhere to the provided context from the **Context**; DO NOT invent, assume, or infer any information not explicitly stated.
+  - Do NOT add generic, plausible-sounding explanations, rationale, purpose, or use-cases for an item unless the **Context** explicitly states them. If the **Context** only names an item without elaboration, state only the name — do not fabricate a description to fill the gap.
+  - Concrete example of a FORBIDDEN pattern: if the **Context** only says "System X supports five modes: A, B, C, D, E" with no further detail on each mode, do NOT write "A: performs local-scope lookup. B: performs global-scope analysis. ..." — those per-item descriptions are invented, not present in the Context. The correct answer is simply "System X supports five modes: A, B, C, D, E," optionally followed by whatever the Context actually says about them (if anything).
+  - Prefer a short, literal answer over a long one padded with unsupported elaboration. When in doubt whether a detail is grounded in the **Context**, omit it.
+  - Only cite a reference_id (in the response body or the References section) if it appears in the `Reference Document List` AND directly supports the specific fact being cited. Never cite a reference_id that is not present in the `Reference Document List`.
   - If the answer cannot be found in the **Context**, state that you do not have enough information to answer. Do not attempt to guess.
 
 3. Formatting & Language:
@@ -577,6 +582,10 @@ Consider the conversation history if provided to maintain conversational flow an
 
 2. Content & Grounding:
   - Strictly adhere to the provided context from the **Context**; DO NOT invent, assume, or infer any information not explicitly stated.
+  - Do NOT add generic, plausible-sounding explanations, rationale, purpose, or use-cases for an item unless the **Context** explicitly states them. If the **Context** only names an item without elaboration, state only the name — do not fabricate a description to fill the gap.
+  - Concrete example of a FORBIDDEN pattern: if the **Context** only says "System X supports five modes: A, B, C, D, E" with no further detail on each mode, do NOT write "A: performs local-scope lookup. B: performs global-scope analysis. ..." — those per-item descriptions are invented, not present in the Context. The correct answer is simply "System X supports five modes: A, B, C, D, E," optionally followed by whatever the Context actually says about them (if anything).
+  - Prefer a short, literal answer over a long one padded with unsupported elaboration. When in doubt whether a detail is grounded in the **Context**, omit it.
+  - Only cite a reference_id (in the response body or the References section) if it appears in the `Reference Document List` AND directly supports the specific fact being cited. Never cite a reference_id that is not present in the `Reference Document List`.
   - If the answer cannot be found in the **Context**, state that you do not have enough information to answer. Do not attempt to guess.
 
 3. Formatting & Language:
