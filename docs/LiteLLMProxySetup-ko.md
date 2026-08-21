@@ -785,7 +785,106 @@ if isinstance(response, str):
 **EXAONE-style 감지 조건 변경 이력:**
 - `total > 40` (commit 3f51427) → `total > 8` (commit e8d3388): 11자 단행 garbage(`=>){ },>>같은`) 감지를 위해 임계값 대폭 낮춤
 
-이 수정은 `commit 35a5a66` + `a9970c1` + `3f51427` + `e8d3388` + `42e248b` + `b074e63` + `f245e61` + `fdb340f` + `3816676`에서 순차 적용되었으며 서버 override 파일(`/svc/app/lightrag/override/operate.py`)에 포함됩니다.
+이 수정은 `commit 35a5a66` + `a9970c1` + `3f51427` + `e8d3388` + `42e248b` + `b074e63` + `f245e61` + `fdb340f` + `3816676`에서 순차 적용되었습니다.
+
+> **2026-08-21 변경:** `/svc/app/lightrag/override/` 핫픽스 메커니즘(Jenkins가 `docker cp`로 빌드 이미지 위에 덮어쓰던 방식)은 **폐기되었습니다**. 당시 override 파일이 git의 최신 커밋보다 오래되어, 정상적으로 빌드된 이미지의 `prompt.py` 수정사항을 배포 시점에 도로 덮어써버리는 사고가 있었습니다. 이제 `operate.py`/`prompt.py` 변경은 git 커밋 → Jenkins 빌드 이미지에 정상적으로만 반영됩니다. override 파일은 `/svc/app/lightrag/override/_retired_20260821/`에 백업되어 있습니다.
+
+---
+
+### 증상: 응답 중간에 한자/키릴 문자가 한글에 붙어서 튀어나옴 (`효율적인变更처리를`, `표준운영절часть`)
+
+**원인:** `Qwen3.8-27B`(node159, LiteLLM 4000 경유)가 응답을 생성하는 도중 확률적으로 다른 문자 체계(중국어 간체 한자, 키릴 문자 등)를 한 단어처럼 한글에 붙여서 출력하는 습관이 있습니다. AWQ 모델의 max_tokens 근처 garbage tail과 달리, 문장 **중간**에 1~5자 정도만 섞여 나오며 재현율은 낮음(수 회 질의 중 1~2회). 그래프에 저장된 오염이 아니라 **응답 생성 시점의 즉석 현상**임을 서로 다른 3개 서브그래프(노드 268개, 엣지 382개)를 뒤져 확인함.
+
+**해결 (코드 수정, `lightrag/operate.py`, commit `20a6e32` + `def1a87`):**
+
+`_trim_garbage_tail()`은 줄 전체를 버리는 방식이라 문단 중간의 글자 몇 개를 지우기엔 부적합합니다. 대신 한글에 공백 없이 바로 붙은 비ASCII·비한글 문자만 **외과적으로 제거**합니다 (줄 전체는 보존):
+
+```python
+# 한글에 공백 없이 붙은 모든 비ASCII·비한글 문자 — Qwen3.8-27B의 다국어 혼입
+# 현상(变更, часть 등)을 겨냥. 현대 한국어 문서의 정상적인 외국어 표기는
+# 항상 괄호 안이거나 공백으로 분리되어 있으므로(예: "표준(標準)"),
+# 붙어있는 것만 제거해도 오탐 위험이 낮음.
+_GLUED_FOREIGN_SCRIPT_PATTERN = re.compile(
+    r"[^\x00-\x7F가-힣㄰-㆏]+(?=[가-힣])|(?<=[가-힣])[^\x00-\x7F가-힣㄰-㆏]+"
+)
+```
+
+`_trim_garbage_tail()`의 for 루프 초입, `total = len(stripped)` 계산 전에 다음을 추가:
+
+```python
+if any("가" <= c <= "힣" for c in stripped):
+    despurred = _GLUED_FOREIGN_SCRIPT_PATTERN.sub("", line)
+    if despurred != line:
+        line = despurred
+        stripped = line.strip()
+```
+
+**검증 예시:**
+| 입력 | 출력 |
+|---|---|
+| `효율적인变更처리를 위한 방법과` | `효율적인처리를 위한 방법과` |
+| `[KG: 표준운영절часть]` | `[KG: 표준운영절]` |
+| `표준(標準) 운영 절차` (괄호 안, 보존 대상) | `표준(標準) 운영 절차` (변화 없음) |
+
+---
+
+### 증상: 응답에 프롬프트에 없는 인용 마커가 등장 (`[KG: 표준운영절차]`, `[ref_1]`, `[ref_ids=KG:...]`)
+
+**원인:** 프롬프트는 `[n]` 형식(References 목록의 reference_id)만 지시하는데, `Qwen3.8-27B`가 자체적으로 `[KG: entity_name]`류의 인용 형식을 만들어내는 경우가 있습니다. 이때 엔티티 이름 끝 글자가 잘려 나오는 등 이중으로 지저분해짐.
+
+**해결 (2단계, defense-in-depth):**
+
+1. **프롬프트 규칙 추가** (`lightrag/prompt.py`, `rag_response`/`naive_rag_response`의 "2. Content & Grounding" 섹션):
+   ```
+   The ONLY valid in-text citation marker is `[n]`, where n is a reference_id
+   from the `Reference Document List`. NEVER invent any other citation syntax
+   (e.g. `[KG: entity_name]`, `[ref:...]`, `(source: ...)`) — these formats do
+   not exist in this system and must not appear anywhere in the response.
+   ```
+
+2. **코드 안전장치** (`lightrag/operate.py`, commit `b528a09`) — 프롬프트 규칙만으로는 이 모델에서 안 지켜지는 경우가 반복적으로 확인되어, `_replace_references_section()`에 정규식 백스톱을 추가:
+   ```python
+   # 프롬프트가 지시한 `[n]` 형식이 아닌 인용 마커
+   # (예: "[KG: ...]", "[ref_1]", "[ref_ids=KG:...]") 제거
+   _INVALID_CITATION_PATTERN = re.compile(
+       r"\s*\[(?:[^\[\]]*\bref|[^\[\]]*\bKG\b)[^\[\]]*\]", re.IGNORECASE
+   )
+   ```
+   `_replace_references_section()`에서 `_trim_garbage_tail()` 호출 **직전**에 `body = _INVALID_CITATION_PATTERN.sub("", body)`로 적용.
+
+---
+
+### 지식 그래프 엔티티 이름 오염 — 발견·정리 절차 (2026-08-21)
+
+**배경:** 6/15 최초 색인 당시(EXAONE + Qwen3-1.7B 역할 분리 구성) 엔티티 추출 과정에서 한/영 단어가 글자 단위로 붙어버린 손상된 엔티티 이름이 그래프에 다수 저장되어 있었습니다. 예: `표준운Operating Procedure`, `표준운 operating procedure`(공백 있는 변형), `ITSM 시스ystem`, `문제관리 이력Problems`. 이 손상은 `_trim_garbage_tail()`(응답 후처리)의 적용 범위 밖 — **인덱싱 시점 그래프 데이터 자체의 문제**라 별도 점검이 필요합니다.
+
+**점검 방법 (API로 전체 라벨 스캔):**
+```bash
+curl -s "http://<server>:9621/graph/label/list" > labels.json
+python3 -c "
+import json, re
+labels = json.load(open('labels.json'))
+labels = labels if isinstance(labels, list) else labels.get('labels', labels)
+patterns = [
+    re.compile(r'[A-Za-z]{3,}[가-힣]'),      # 영→한 붙음
+    re.compile(r'[가-힣][A-Za-z]{3,}'),      # 한→영 붙음
+    re.compile(r'[가-힣]\s[a-z]{4,}'),       # 한글+공백+소문자영단어 (예: '표준운 operating')
+]
+for l in labels:
+    if any(p.search(l) for p in patterns):
+        print(l)
+"
+```
+> **주의:** `ITSM에`, `KPI측정목적`처럼 영어 약어에 한국어 조사가 자연스럽게 붙는 정상 표기는 같은 정규식에 걸리므로 **결과를 하나씩 육안 확인**해야 함. `CONTENTS`, `SOLUTION`처럼 ALL_CAPS 자체는 이 패턴에 안 걸리지만 설명이 자기 이름을 반복하는 정크 엔티티(목차 제목·다이어그램 라벨 뭉침)일 수 있으므로 별도로 `entity_type`/`description`을 확인.
+
+**정리 API (`lightrag_server.py` 라우터):**
+| 상황 | 엔드포인트 | 용도 |
+|---|---|---|
+| 오염된 이름의 정상 버전이 이미 그래프에 존재 | `POST /graph/entities/merge` | `entities_to_change`(손상 이름 목록) → `entity_to_change_into`(정상 이름)로 병합, 관계까지 이전 |
+| 정상 버전이 아직 없음 | `POST /graph/entity/edit` | `{"entity_name": "손상이름", "updated_data": {"entity_name": "정상이름"}, "allow_rename": true}` |
+| 관계 0개인 내용 없는 정크 엔티티 | `DELETE /documents/delete_entity` | `{"entity_name": "..."}`  — 삭제 전 `entity_type`/`description` 확인 필수 |
+
+**2026-08-21 정리 결과:** 오염 엔티티 26건(병합 9 + 이름변경 13 + 문장형 명사구 전환 3, 삭제 4건 별도) 정리, 라벨 수 771 → 754. 병합 시 여러 출처의 `description`이 `<SEP>`로 이어붙는데, **원문 오염 텍스트는 description 안에 그대로 남습니다** — 완전히 정리하려면 해당 문서를 재색인해야 함(엔티티 이름 자체는 깨끗해짐).
 
 ---
 
@@ -882,6 +981,24 @@ docker restart $CONTAINER
   - Provide maximum of 5 most relevant citations.
   - Do not generate anything after the References section.
 ```
+
+---
+
+## 향후 개선 과제 (미해결, 2026-08-21 기준)
+
+### 공백 있는 한/영 단어 혼입 — 코드로 안전하게 못 막음
+
+**증상:** 프롬프트에 이미 명시적 금지 규칙(`Do NOT mix Korean and English for the same concept`, 예시로 `운Operating절차` 자체를 들고 있음)이 있는데도 `Qwen3.8-27B`가 여전히 위반함:
+- `응용프로그램 표준운 Operating Procedure의 주요 목적은` — 괄호 없는 영어 번역 주석을 스스로 덧붙임
+- `서비스 영향과 위험 occurrence를 최소화` — "발생" 대신 영어 단어로 치환, 조사(`를`)가 바로 붙음
+
+**왜 이번엔 정규식으로 못 막았나:** 앞서 고친 두 문제(외국 문자 붙음, 잘못된 인용마커)는 "한글에 붙은 비ASCII 문자"나 "특정 키워드 포함 대괄호"처럼 **오탐 위험이 거의 없는 패턴**이었습니다. 이번 건은 다릅니다 — 같은 문서에 `ITSM에`, `KPI측정목적`처럼 **정상적인 대문자 약어+조사 결합**이 이미 많고, `_trim_garbage_tail()`의 기존 주석에도 "`WebSocket API를`처럼 혼합 대소문자 기술용어는 보호해야 한다"는 예외가 명시되어 있을 정도로 — 대소문자 패턴만으로는 정상적인 기술 용어(`WebSocket`, `CMDB`)와 모델이 치환한 일반 단어(`occurrence`, `Operating`)를 구분할 방법이 마땅치 않습니다. 잘못 건드리면 정상 콘텐츠를 지우는 역효과가 더 큽니다.
+
+**다음에 시도해볼 만한 방향 (우선순위순 추정):**
+1. **프롬프트 부정 예시 추가 강화** — 지금도 예시가 있지만 안 지켜짐. `occurrence`처럼 조사가 바로 붙는 사례를 예시에 추가하는 정도는 시도해볼 수 있음(효과 불확실).
+2. **생성 파라미터 조정** — `.env`의 `OPENAI_LLM_EXTRA_BODY`에 있는 `repetition_penalty`(현재 1.15)를 올려보거나, 다른 샘플링 파라미터(`temperature`, `top_p`) 조정 시도. 다만 이 현상이 반복이 아니라 확률적 단어 선택 문제라 효과가 제한적일 수 있음.
+3. **화이트리스트 기반 정규식** — 문서에 실제 등장하는 정상 대문자 약어 목록(ITSM, CAB, RFC, SLA, KPI, CMDB, ESM 등)을 화이트리스트로 관리하고, 화이트리스트에 없는 한글-붙은 영어 단어만 제거하는 방식. 유지보수 부담이 있지만 오탐 위험은 최소화 가능.
+4. **모델 교체 검토** — 근본적으로 `Qwen3.8-27B`(node159)가 이 특정 습관을 가진 것일 수 있음. `EXAONE-4.5-33B`(node210, 이전 구성)에서는 이 정확한 패턴이 관찰되지 않았으므로, 모델별 특성 차이일 가능성 — 재현 빈도를 모델별로 비교해볼 가치가 있음.
 
 ---
 
