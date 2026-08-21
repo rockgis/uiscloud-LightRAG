@@ -528,6 +528,7 @@ Consider the conversation history if provided to maintain conversational flow an
   - Concrete example of a FORBIDDEN pattern: if the **Context** only says "System X supports five modes: A, B, C, D, E" with no further detail on each mode, do NOT write "A: performs local-scope lookup. B: performs global-scope analysis. ..." — those per-item descriptions are invented, not present in the Context. The correct answer is simply "System X supports five modes: A, B, C, D, E," optionally followed by whatever the Context actually says about them (if anything).
   - Prefer a short, literal answer over a long one padded with unsupported elaboration. When in doubt whether a detail is grounded in the **Context**, omit it.
   - Only cite a reference_id (in the response body or the References section) if it appears in the `Reference Document List` AND directly supports the specific fact being cited. Never cite a reference_id that is not present in the `Reference Document List`.
+  - The ONLY valid in-text citation marker is `[n]`, where n is a reference_id from the `Reference Document List`. NEVER invent any other citation syntax (e.g. `[KG: entity_name]`, `[ref:...]`, `(source: ...)`) — these formats do not exist in this system and must not appear anywhere in the response.
   - If the answer cannot be found in the **Context**, state that you do not have enough information to answer. Do not attempt to guess.
 
 3. Formatting & Language:
@@ -586,6 +587,7 @@ Consider the conversation history if provided to maintain conversational flow an
   - Concrete example of a FORBIDDEN pattern: if the **Context** only says "System X supports five modes: A, B, C, D, E" with no further detail on each mode, do NOT write "A: performs local-scope lookup. B: performs global-scope analysis. ..." — those per-item descriptions are invented, not present in the Context. The correct answer is simply "System X supports five modes: A, B, C, D, E," optionally followed by whatever the Context actually says about them (if anything).
   - Prefer a short, literal answer over a long one padded with unsupported elaboration. When in doubt whether a detail is grounded in the **Context**, omit it.
   - Only cite a reference_id (in the response body or the References section) if it appears in the `Reference Document List` AND directly supports the specific fact being cited. Never cite a reference_id that is not present in the `Reference Document List`.
+  - The ONLY valid in-text citation marker is `[n]`, where n is a reference_id from the `Reference Document List`. NEVER invent any other citation syntax (e.g. `[KG: entity_name]`, `[ref:...]`, `(source: ...)`) — these formats do not exist in this system and must not appear anywhere in the response.
   - If the answer cannot be found in the **Context**, state that you do not have enough information to answer. Do not attempt to guess.
 
 3. Formatting & Language:

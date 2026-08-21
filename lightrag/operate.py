@@ -3671,6 +3671,14 @@ _GLUED_FOREIGN_SCRIPT_PATTERN = re.compile(
     r"[^\x00-\x7F가-힣㄰-㆏]+(?=[가-힣])|(?<=[가-힣])[^\x00-\x7F가-힣㄰-㆏]+"
 )
 
+# Invented citation markers the model sometimes emits instead of the prompted
+# `[n]` format (e.g. "[KG: 표준운영절차]", "[ref_1]", "[ref_ids=KG:...]").
+# These don't correspond to any entry in the Reference Document List, so they
+# are stripped rather than left in the response to mislead the reader.
+_INVALID_CITATION_PATTERN = re.compile(
+    r"\s*\[(?:[^\[\]]*\bref|[^\[\]]*\bKG\b)[^\[\]]*\]", re.IGNORECASE
+)
+
 
 def _trim_garbage_tail(body: str) -> str:
     """Remove garbage characters that appear at the end of AWQ model output.
@@ -3775,6 +3783,10 @@ def _replace_references_section(response: str, reference_list: list) -> str:
         last_start = m.start()
 
     body = response[:last_start].rstrip() if last_start is not None else response.rstrip()
+
+    # Strip invented citation markers (e.g. "[KG: ...]", "[ref_1]") that don't
+    # follow the prompted `[n]` format
+    body = _INVALID_CITATION_PATTERN.sub("", body)
 
     # Remove garbage tail produced by AWQ models at max_tokens boundary
     body = _trim_garbage_tail(body)
